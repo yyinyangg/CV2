@@ -80,7 +80,7 @@ def shift_disparity(i_1,d):
 	i_d = np.zeros([H,W])
 	for i in range(H):
 		for j in range(W):
-			shift = d[i,j]
+			shift = int(d[i,j])
 			i_d[i,j-shift] = i_1[i,j]
 
 	return i_d
@@ -97,13 +97,13 @@ def gaussian_nllh(i_0, i_1_d, mu, sigma):
 	#										IMPLEMENT											 #
 	##############################################################################################
 	def gaussian(x,mu,sigma):
-		return math.exp(-(x-mu)**2/2/sigma**2)/(2*math.pi)**(0.5)/sigma
+		return np.log((2*np.pi)**(0.5)*sigma)+(x-mu)**2/2/sigma**2
 	H,W = i_0.shape
 	nll = 1
 	for i in range(H):
 		for j in range(W):
 			x=i_0[i,j]-i_1_d[i,j]
-			nll=nll*gaussian(x,mu,sigma)
+			nll=nll+gaussian(x,mu,sigma)
 	return nll
 
 # compute the negative log of the Laplacian likelihood
@@ -118,13 +118,14 @@ def laplacian_nllh(i_0, i_1_d, mu,s):
 	#										IMPLEMENT											 #
 	##############################################################################################
 	def laplacian(x,mu,s):
-		return math.exp(-math.abs(x-mu)/s)/(2*s)
+		return np.log(2*s)+abs(x-mu)/s
 	H,W = i_0.shape
 	nll =1
 	for i in range(H):
 		for j in range(W):
 			x= i_0[i,j] - i_1_d[i,j]
-			nll = nll*laplacian(x,mu,s)
+			nll = nll+laplacian(x,mu,s)
+			#print(nll)
 	return nll
 
 # replace p% of the image pixels with values from a normal distribution
@@ -136,8 +137,21 @@ def make_noise(img, p):
 	##############################################################################################
 	#										IMPLEMENT											 #
 	##############################################################################################
-	return 0
-	#return img_noise
+
+	H,W = img.shape
+	img_noise = img.copy()
+	num = int(img.size*p/100)
+	lst=[]
+	while(len(lst)<num):
+		x = np.random.choice(W, 1)[0]
+		y = np.random.choice(H, 1)[0]
+		lst.append((y,x))
+		lst = list(set(lst))
+	while(len(lst)>0):
+		posi = lst.pop()
+		img_noise[posi] = np.random.normal(loc=0.32, scale=0.78)
+
+	return img_noise
 
 # apply noise to i1_sh and return the values of the negative lok-likelihood for both likelihood models with mu, sigma, and s
 # input (i0): numpy array of shape (H, W)
@@ -148,13 +162,15 @@ def make_noise(img, p):
 # input (s): float
 # output (gnllh) - gaussian negative log-likelihood: numpy scalar of shape ()
 # output (lnllh) - laplacian negative log-likelihood: numpy scalar of shape ()
-def get_nllh_for_corrupted(i_0, i_1_d, noise, mu, sigma, s):
+def get_nllh_for_corrupted(i_0, i1_sh, noise, mu, sigma, s):
 
 	##############################################################################################
 	#										IMPLEMENT											 #
 	##############################################################################################
-	return 0
-	#return gnllh, lnllh
+	i1_sh = make_noise(i1_sh,noise)
+	gnllh = gaussian_nllh(i_0, i1_sh, mu, sigma)
+	lnllh = laplacian_nllh(i_0, i1_sh, mu, s)
+	return gnllh, lnllh
 
 
 # DO NOT CHANGE
@@ -162,7 +178,7 @@ def main():
 	# load images
 	i0, i1, gt = load_data('./data/i0.png', './data/i1.png', './data/gt.png')
 	i0, i1 = rgb2gray(i0), rgb2gray(i1)
-	print(i0)
+
 	# shift i1
 	i1_sh = shift_disparity(i1, gt)
 
@@ -173,9 +189,11 @@ def main():
 	mu = 0.0
 	sigma = 1.3
 	s = 1.3
+
 	for noise in [0.0, 15.0, 28.0]:
 
 		gnllh, lnllh = get_nllh_for_corrupted(i0, i1_sh, noise, mu, sigma, s)
+		print([f'noise percentage {noise}%: gnllh ={gnllh},lnllh ={lnllh} '])
 
 if __name__ == "__main__":
 	main()
