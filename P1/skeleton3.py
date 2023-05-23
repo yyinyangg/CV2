@@ -1,7 +1,7 @@
 
 from PIL import Image
 import numpy as np
-import math
+
 np.random.seed(seed=2023)
 
 # convert a RGB image to grayscale
@@ -32,12 +32,15 @@ def load_data(i0_path, i1_path, gt_path):
 	##############################################################################################
 	#										IMPLEMENT											 #
 	##############################################################################################
-	i_0 = Image.open(i0_path)
-	i_1 = Image.open(i1_path)
-	g_t = Image.open(gt_path)
-	i_0 = np.array(i_0)/255
-	i_1 = np.array(i_1)/255
-	g_t = np.array(g_t)/255
+	i_0 = np.array(Image.open(i0_path),dtype='float64')
+	i_1 = np.array(Image.open(i1_path),dtype='float64')
+	g_t = np.array(Image.open(gt_path),dtype='float64')
+
+	i_0 = i_0/i_0.max()
+
+	i_1 = i_1/i_1.max()
+	#g_t = (g_t-g_t.min())*16/(g_t.max()-g_t.min())
+
 	return i_0, i_1, g_t
 
 # image to the size of the non-zero elements of disparity map
@@ -91,6 +94,7 @@ def shift_disparity(i_1,d):
 # input (mu): float
 # input (sigma): float
 # output (nll): numpy scalar of shape ()
+
 def gaussian_nllh(i_0, i_1_d, mu, sigma):
 
 	##############################################################################################
@@ -105,6 +109,7 @@ def gaussian_nllh(i_0, i_1_d, mu, sigma):
 			x=i_0[i,j]-i_1_d[i,j]
 			nll=nll+gaussian(x,mu,sigma)
 	return nll
+
 
 # compute the negative log of the Laplacian likelihood
 # input (i_0): numpy array of shape (H, W)
@@ -132,6 +137,7 @@ def laplacian_nllh(i_0, i_1_d, mu,s):
 # input (img): numpy array of shape (H, W)
 # input (p): float
 # output (img_noise): numpy array of shape (H, W)
+
 def make_noise(img, p):
 
 	##############################################################################################
@@ -152,6 +158,7 @@ def make_noise(img, p):
 		img_noise[posi] = np.random.normal(loc=0.32, scale=0.78)
 
 	return img_noise
+
 
 # apply noise to i1_sh and return the values of the negative lok-likelihood for both likelihood models with mu, sigma, and s
 # input (i0): numpy array of shape (H, W)
