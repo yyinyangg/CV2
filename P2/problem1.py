@@ -17,6 +17,7 @@ def load_data(gt_path):
     """
     g_t = Image.open(gt_path)
     g_t = np.array(g_t,dtype='float64')
+    #print(g_t.max())
     return g_t
 
 
@@ -28,7 +29,6 @@ def random_disparity(disparity_size):
 
     Returns:
         disparity_map: numpy array of shape (H, W)
-
     """
     disparity_map = np.random.randint(low=0, high=13, size=disparity_size, dtype=int)
     return disparity_map
@@ -45,7 +45,7 @@ def constant_disparity(disparity_size, a):
         disparity_map: numpy array of shape (H, W)
 
     """
-    disparity_map = np.full(disparity_size, a)
+    disparity_map = np.full(disparity_size, a,dtype=float)
     return disparity_map
 
 
