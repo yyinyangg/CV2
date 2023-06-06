@@ -89,7 +89,7 @@ def log_gaussian(x,  mu, sigma):
     grad = np.zeros((H,W))
     for i in range(1, H-1):
         for j in range(1, W-1):
-            grad[i,j] = (x[i-1,j]+x[i+1,j]+x[i,j-1]+x[i,j+1]-4*x[i,j])/sigma**2
+            grad[i,j] = -(x[i-1,j]+x[i+1,j]+x[i,j-1]+x[i,j+1]-4*x[i,j])/sigma**2
     # return the value and the gradient
     return value, grad
 
@@ -125,17 +125,13 @@ def shift_interpolated_disparity(im1, d):
         ys = im1[i,:].reshape(W)
         interp_func = interpolate.interp1d(xs, ys, kind='cubic')
         for j in range(W):
-            if d[i,j]>14:
-                d[i,j]=14
-            if d[i,j]< -14:
-                d[i,j] = -14
-            shift = d[i, j]
-            x_new = j- shift
+            x_new = j-d[i, j]
             if x_new > W-1:
-                x_new = W-1
-            if x_new < 0:
-                x_new =0
-            shifted_im1[i, j] = interp_func(x_new)
+                shifted_im1[i, j] = 0
+            elif x_new < 0:
+                shifted_im1[i, j] = 0
+            else:
+                shifted_im1[i, j] = interp_func(x_new)
 
     return shifted_im1
 
@@ -154,13 +150,16 @@ def stereo_log_likelihood(x, im0, im1, mu, sigma):
     Hint: Make use of shift_interpolated_disparity and log_gaussian
     """
     shifted_im1 = shift_interpolated_disparity(im1,x)
-    diff = im0-shifted_im1
+    diff = im0-shifted_im1-mu
+    ''''''
     logp = -0.5*(diff**2)/sigma**2
     value = np.sum(logp)
 
-    kernel = (1,0,-1)
-    derivateH = ndimage.convolve1d(shifted_im1,kernel,axis=1,mode="constant")
+    kernel = np.array([-1,0,1])/2
+    derivateH = -ndimage.convolve1d(shifted_im1,kernel,axis=1,mode="constant")
     grad = (diff/sigma**2)*derivateH
+
+    #value, grad = log_gaussian(diff,mu,sigma)
 
     return value, grad
 
@@ -182,7 +181,7 @@ def stereo_log_posterior(d, im0, im1, mu, sigma, alpha):
     log_likelihood, log_likelihood_grad = stereo_log_likelihood(d,im0,im1,mu,sigma)
     log_posterior = log_likelihood + alpha * log_prior
     log_posterior_grad = log_likelihood_grad + alpha * log_prior_grad
-    #print(log_posterior)
+    print(-log_posterior)
     return log_posterior, log_posterior_grad
 
 
@@ -206,6 +205,7 @@ def stereo(d0, im0, im1, mu, sigma, alpha, method=optim_method()):
     Returns:
         d: numpy.float 2d-array estimated value of the disparity
     """
+    print(d0.reshape(d0.size))
     def fun(args):
         im0, im1, mu, sigma, alpha = args
         v = lambda d: -stereo_log_posterior(d, im0, im1, mu, sigma, alpha)[0]
@@ -216,10 +216,13 @@ def stereo(d0, im0, im1, mu, sigma, alpha, method=optim_method()):
         return v
 
     args = (im0, im1, mu, sigma, alpha)
+
     res = optimize.minimize(fun(args),d0.flatten(),method=method,jac=grad(args))
-    #print(res.fun)
-    #print(res.success)
-    #print(res.x)
+    ''''''
+    print(res.fun)
+    print(res.success)
+    print(res.x)
+
     return res.x.reshape(im1.shape)
 
 def coarse2fine(d0, im0, im1, mu, sigma, alpha, num_levels):
@@ -290,8 +293,8 @@ def coarse2fine(d0, im0, im1, mu, sigma, alpha, num_levels):
         return upsampled_image
 
     fsize = (5, 5)
-    sigma = 1.4
-    gf = gauss2d(sigma, fsize)
+    kernelsigma = 1.4
+    gf = gauss2d(kernelsigma, fsize)
     bf = binomial2d(fsize)
     img0_pyramid = []
     img1_pyramid = []
@@ -327,31 +330,38 @@ def main():
     sigma = 1.7
 
     # experiment with other values of alpha
-    alpha = 0.5
+    alpha = 1.0
 
     # initial disparity map
     # experiment with constant/random values
     d0 = gt
-
-    #d0 = random_disparity(gt.shape)
-    d0 = constant_disparity(gt.shape, 6)
-    '''
-    print(np.sum(d0))
+    d0 = random_disparity(gt.shape)
+    #d0 = constant_disparity(gt.shape, 6)
 
     # Display stereo: Initialized with noise
     disparity = stereo(d0, im0, im1, mu, sigma, alpha)
-    print(np.sum(disparity))
-'''
+
     # Pyramid
+    '''
     print("sum of GT", np.sum(gt))
     print("sum of d0", np.sum(d0))
+    print("sum of d* with out pyramid", np.sum(disparity))
+    print("difference with out pyramid", np.sum(disparity-gt))
+    '''
     num_levels = 3
     pyramid = coarse2fine(d0, im0, im1, mu, sigma, alpha,num_levels)
-
-    #for i in range(len(pyramid)):
-        #print(np.sum(pyramid[i]))
+    '''
     print("sum of d*: ", np.sum(pyramid[0]))
     print("the difference is: ", np.sum(pyramid[0]-gt))
-
+    '''
 if __name__ == "__main__":
+    '''
+    i) initialise the d0 using gt, the Algorithm ends up near gt, indicating that gt is already the optimal answer.
+    ii) initialise the d0 using constant value, the Algorithm stops near d0, showing no optimization effect, 
+    cause the constant disparity indicates the highest compatibility, meaning every pixel is correlated to its neighbor.
+    based on the Observation, we can make the conclusion, that constant value is not a good Initialisation.
+    iii) initialise the d0 using random value, the Algorithm converge towards GT, showing an optimization effect,
+    we can see the random value is a better initialization Option.
+    
+    '''
     main()
