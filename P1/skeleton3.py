@@ -47,6 +47,7 @@ def load_data(i0_path, i1_path, gt_path):
 # input (img): numpy array of shape (H, W)
 # input (d): numpy array of shape (H, W)
 # output (img_crop): numpy array of shape (H', W')
+'''
 def crop_image(img, d):
 
 	##############################################################################################
@@ -69,6 +70,27 @@ def crop_image(img, d):
 	img_crop = img[indexLeft:indexRight+1,indexTop:indexBottom+1]
 
 	return img_crop
+'''
+def crop_image(img, d):
+
+	##############################################################################################
+	#										IMPLEMENT											 #
+	##############################################################################################
+	'''
+	reference: https://numpy.org/doc/stable/reference/generated/numpy.nonzero.html
+	'''
+	H_prima, W_prima = np.nonzero(d > 0)  # get the x and y-axis of non-zero values
+	h_min = np.min(H_prima)
+	h_max = np.max(H_prima)
+	w_min = np.min(W_prima)
+	w_max = np.max(W_prima)  # get the top left(h_min, w_min) and bottom right(h_max, w_max) points of non-zero value
+	# print(h_min)
+	# print(h_max)
+	# print(w_min)
+	# print(w_max)
+	img_crop = img[h_min:h_max+1, w_min:w_max+1]
+
+	return img_crop
 
 # shift all pixels of i1 by the value of the disparity map
 # input (i_1): numpy array of shape (H, W)
@@ -84,7 +106,7 @@ def shift_disparity(i_1,d):
 	for i in range(H):
 		for j in range(W):
 			shift = int(d[i,j])
-			i_d[i,j-shift] = i_1[i,j]
+			i_d[i,j] = i_1[i,j-shift]
 
 	return i_d
 
