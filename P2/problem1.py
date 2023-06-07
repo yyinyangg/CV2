@@ -81,7 +81,6 @@ def mrf_log_prior(x, mu, sigma):
     diff_H = np.zeros((H, W - 1))
     diff_V = np.zeros((H - 1, W))
     for i, row in enumerate(np.split(x, H, axis=0)):
-
         if i == 0:
             old_row = row
         diff_V[i - 1, :] = row - old_row

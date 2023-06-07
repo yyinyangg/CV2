@@ -11,7 +11,10 @@ import matplotlib.pyplot as plt
 from problem1 import random_disparity
 from problem1 import constant_disparity
 np.random.seed(seed=2023)
-
+h_min = 0
+h_max = 0
+w_min = 0
+w_max = 0
 
 def rgb2gray(rgb):
     """Converting RGB image to greyscale.
@@ -50,22 +53,28 @@ def load_data(i0_path, i1_path, gt_path):
     i_1 = np.array(Image.open(i1_path), dtype='float64')
     g_t = np.array(Image.open(gt_path), dtype='float64')
 
-    i_0 = i_0 / i_0.max()
+    i_0 = i_0 / 255
 
-    i_1 = i_1 / i_1.max()
+    i_1 = i_1 / 255
 
     #mask the boundary of raw image to 0, cause the corresponding disparity is 0
     H_prima, W_prima = np.nonzero(g_t > 0)  # get the x and y-axis of non-zero values
+    global h_min
+    global h_max
+    global w_min
+    global w_max
     h_min = np.min(H_prima)
     h_max = np.max(H_prima)
     w_min = np.min(W_prima)
     w_max = np.max(W_prima)
-    crop_i_0 = np.zeros_like(i_0)
-    crop_i_1 = np.zeros_like(i_1)
-    crop_i_0[h_min:h_max+1,w_min:w_max+1] = i_0[h_min:h_max+1,w_min:w_max+1]
-    crop_i_1[h_min:h_max + 1, w_min:w_max + 1] = i_1[h_min:h_max + 1, w_min:w_max + 1]
-    return crop_i_0, crop_i_1, g_t
+    mask_i_0 = maskImage(i_0)
+    mask_i_1 = maskImage(i_1)
+    return mask_i_0, mask_i_1, g_t
 
+def maskImage(img):
+    maskImg = np.zeros_like(img)
+    maskImg[h_min:h_max+1,w_min:w_max+1] = img[h_min:h_max+1,w_min:w_max+1]
+    return  maskImg
 def log_gaussian(x,  mu, sigma):
     """Calcuate the value and the gradient w.r.t. x of the Gaussian log-density
 
@@ -78,31 +87,9 @@ def log_gaussian(x,  mu, sigma):
         grad: gradient of the log-density w.r.t. x
     """
 
-    def log_gauss(x, mu, sigma):
-        result = -0.5 * ((x - mu) ** 2 / sigma ** 2)
-        return result
-    H, W = x.shape
-    diff_H = np.zeros((H, W - 1))
-    diff_V = np.zeros((H - 1, W))
-    for i, row in enumerate(np.split(x, H, axis=0)):
-        if i == 0:
-            old_row = row
-        diff_V[i - 1, :] = row - old_row
-        old_row = row
+    value = -0.5 * ((x - mu)/sigma) ** 2
+    grad = -(x-mu)/sigma**2
 
-    for j, column in enumerate(np.split(x, W, axis=1)):
-        if j == 0:
-            old_column = column
-        diff_H[:, j - 1] = (column - old_column).reshape(H)
-        old_column = column
-
-    value = np.sum(log_gauss(diff_H, mu, sigma)) + np.sum(log_gauss(diff_V, mu, sigma))
-
-    grad = np.zeros((H,W))
-    for i in range(1, H-1):
-        for j in range(1, W-1):
-            grad[i,j] = -(x[i-1,j]+x[i+1,j]+x[i,j-1]+x[i,j+1]-4*x[i,j])/sigma**2
-    # return the value and the gradient
     return value, grad
 
 def stereo_log_prior(x, mu, sigma):
@@ -115,7 +102,30 @@ def stereo_log_prior(x, mu, sigma):
         value: value of the log-prior
         grad: gradient of the log-prior w.r.t. x
     """
-    value, grad = log_gaussian(x,  mu, sigma)
+    H, W = x.shape
+    diff_H = np.zeros((H, W ))
+    diff_V = np.zeros((H, W))
+    for i, row in enumerate(np.split(x, H, axis=0)):
+        if i == 0:
+            old_row = row
+        diff_V[i - 1, :] = old_row - row
+        old_row = row
+
+    for j, column in enumerate(np.split(x, W, axis=1)):
+        if j == 0:
+            old_column = column
+        diff_H[:, j - 1] = (old_column - column).reshape(H)
+        old_column = column
+    v_H, grad_H = log_gaussian(diff_H, mu, sigma)
+    v_V, grad_V = log_gaussian(diff_V, mu, sigma)
+    value = np.sum(v_H) + np.sum(v_V)
+
+    kernel = [1,-1]
+    getH = ndimage.convolve1d(grad_H, kernel, axis=1, mode="constant", cval=0.0, origin=0)
+    getH = maskImage(getH)
+    getV = ndimage.convolve1d(grad_V, kernel, axis=0, mode="constant", cval=0.0, origin=0)
+    getV = maskImage((getV))
+    grad = getH + getV
     return  value, grad
 
 def shift_interpolated_disparity(im1, d):
@@ -161,12 +171,13 @@ def stereo_log_likelihood(x, im0, im1, mu, sigma):
     Hint: Make use of shift_interpolated_disparity and log_gaussian
     """
     shifted_im1 = shift_interpolated_disparity(im1,x)
-    diff = im0-shifted_im1-mu
-
-    kernel = np.array([-1,0,1])/2
-    derivateH = -ndimage.convolve1d(shifted_im1,kernel,axis=1,mode="constant")
-    value, getGrad = log_gaussian(diff,mu,sigma)
-    grad = getGrad*derivateH
+    diff = im0-shifted_im1
+    value, getGrad = log_gaussian(diff, mu, sigma)
+    value = np.sum(value)
+    kernel = np.array([1,0,-1])
+    derivateH = ndimage.convolve1d(shifted_im1,kernel,axis=1,mode="constant", cval=0.0, origin=0)
+    derivateH = maskImage(derivateH)
+    grad = -getGrad*derivateH
 
     return value, grad
 
@@ -198,7 +209,8 @@ def optim_method():
     to work well.
     This is graded with 1 point unless the choice is arbitrary/poor.
     """
-    return "NEWTON-CG"
+    #return "Newton-CG"
+    return "L-BFGS-B"
     #return "BFGS"
 
 def stereo(d0, im0, im1, mu, sigma, alpha, method=optim_method()):
@@ -226,8 +238,8 @@ def stereo(d0, im0, im1, mu, sigma, alpha, method=optim_method()):
 
     args = (im0, im1, mu, sigma, alpha)
 
-    res = optimize.minimize(fun(args),d0.flatten(),method=method,tol=1e-5 ,jac=grad(args),options={'return_all': True,'maxiter' : 2})
-
+    res = optimize.minimize(fun(args),d0.flatten(),method=method,tol=1e-5 ,jac=grad(args))
+    print(res.success)
     get = res.x.reshape(im1.shape)
     plt.imshow(get)
     plt.show()
@@ -283,7 +295,7 @@ def coarse2fine(d0, im0, im1, mu, sigma, alpha, num_levels):
         img  = np.array(img,dtype='float64')
         min = img.min()
         max = img.max()
-        img = 14/(max-min)*(img-min)
+        #img = 14/(max-min)*(img-min)
         return img
 
     fsize = (5, 5)
@@ -325,7 +337,7 @@ def main():
     sigma = 1.7
 
     # experiment with other values of alpha
-    alpha = 10
+    alpha = 0.5
 
     # initial disparity map
     # experiment with constant/random values
@@ -337,18 +349,10 @@ def main():
     #disparity = stereo(d0, im0, im1, mu, sigma, alpha)
 
     # Pyramid
-    '''
-    print("sum of GT", np.sum(gt))
-    print("sum of d0", np.sum(d0))
-    print("sum of d* with out pyramid", np.sum(disparity))
-    print("difference with out pyramid", np.sum(disparity-gt))
-    '''
+
     num_levels = 3
     pyramid = coarse2fine(d0, im0, im1, mu, sigma, alpha,num_levels)
-    '''
-    print("sum of d*: ", np.sum(pyramid[0]))
-    print("the difference is: ", np.sum(pyramid[0]-gt))
-    '''
+
 if __name__ == "__main__":
     '''
     i) initialise the d0 using gt, the Algorithm ends up near gt, but the disparity map has been blurred, indicating that gt is already the optimal answer.
