@@ -226,7 +226,7 @@ def stereo(d0, im0, im1, mu, sigma, alpha, method=optim_method()):
 
     args = (im0, im1, mu, sigma, alpha)
 
-    res = optimize.minimize(fun(args),d0.flatten(),method=method,tol=1e-5 ,jac=grad(args),options={'return_all': True,'maxiter' : 5})
+    res = optimize.minimize(fun(args),d0.flatten(),method=method,tol=1e-5 ,jac=grad(args),options={'return_all': True,'maxiter' : 2})
 
     get = res.x.reshape(im1.shape)
     plt.imshow(get)

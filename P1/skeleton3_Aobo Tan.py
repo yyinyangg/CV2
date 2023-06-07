@@ -192,7 +192,7 @@ def main():
 	for noise in [0.0, 15.0, 28.0]:
 
 		gnllh, lnllh = get_nllh_for_corrupted(i0, i1_sh, noise, mu, sigma, s)
-
+		print([f'noise percentage {noise}%: gnllh ={gnllh},lnllh ={lnllh} '])
 
 if __name__ == "__main__":
 	main()

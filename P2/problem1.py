@@ -30,7 +30,7 @@ def random_disparity(disparity_size):
     Returns:
         disparity_map: numpy array of shape (H, W)
     """
-    disparity_map = np.random.randint(low=0, high=13, size=disparity_size, dtype=int)
+    disparity_map = np.random.randint(low=0, high=19, size=disparity_size, dtype=int)
     return disparity_map
 
 
