@@ -72,11 +72,11 @@ def evaluate_flow(flow, flow_gt):
     Returns:
         aepe: torch tensor scalar 
     """
-    sum_channel = torch.sum((flow - flow_gt)**2,dim =1)**(0.5)
-    sum_batches = torch.sum(sum_channel,dim=0)
-    sum_batches[flow_gt>1e9] = 0
-    count = (flow_gt>1e9).sum().item()
-    aepe = torch.sum(sum_batches)/count
+    count = (flow_gt <= 1e9).sum().item()/2
+    get = (flow - flow_gt)**2
+    get[flow_gt > 1e9] = 0
+    sum_channel = torch.sum(get,dim =1)**(0.5)
+    aepe = torch.sum(sum_channel)/count
 
     return aepe
 
@@ -149,6 +149,14 @@ def energy_hs(im1, im2, flow, lambda_hs):
     Returns:
         energy: torch tensor scalar
     """
+    im2_warp = warp_image(im2, flow)
+    diff = im2_warp-im1
+
+    fx = torch.tensor([[[[1, -1]]]],dtype=torch.float32)
+    fy = torch.tensor([[[[1], [-1]]]],dtype=torch.float32)
+    delta_u = torch.nn.functional.conv2d(flow[:,0,:,:].unsqueeze(1),fx)
+    delta_v = torch.nn.functional.conv2d(flow[:,1,:,:].unsqueeze(1),fy)
+    energy = torch.sum(diff**2) + lambda_hs*(torch.sum(delta_u**2)+torch.sum(delta_v**2))
 
     return energy
 
@@ -170,7 +178,27 @@ def estimate_flow(im1, im2, flow_gt, lambda_hs, learning_rate, num_iter):
     Returns:
         aepe: torch tensor scalar
     """
-    
+    flow = torch.zeros(flow_gt.shape,requires_grad=True)
+    aepe = evaluate_flow(flow,flow_gt)
+    print(f"AEPE before Optimization is {aepe}")
+
+    for i in range(num_iter):
+        e = energy_hs(im1,im2,flow,lambda_hs)
+        #print(f"energy is {e}")
+        delta = torch.autograd.grad(e,flow,create_graph=True)
+        with torch.no_grad():
+            flow -=learning_rate*delta[0]
+
+    aepe = evaluate_flow(flow,flow_gt)
+    print(f"AEPE after Optimization is {aepe}")
+    flow.requires_grad_(False)
+    getflow = torch2numpy(flow[0])
+    getflow = flow2rgb(getflow)
+
+    fig, axs = plt.subplots(1,1)
+    axs.imshow(getflow)
+    axs.set_title('flow')
+    plt.show()
     return aepe
 
 # Example usage in main()
