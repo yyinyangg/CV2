@@ -75,29 +75,35 @@ def alpha_expansion(noisy, init, edges, candidate_pixel_values, s, lmbda):
     unary = np.zeros((2,N))
     pairwise = np.zeros((N,N))
 
-    round = 1
-    flag = True
-    maxIter = 5
-    while(flag):
-        print(f" start {round} th Round")
-        round +=1
-        new_denoised = np.copy(denoised)
+    round = 0
+    maxIter = 1000
+    new_denoised = np.copy(denoised)
+    Flag = True
+    while(Flag):
+        round += 1
         for v in candidate_pixel_values:
+            print(f" start {round} th Round with v = {v}")
             target = np.full(source.shape,v)
-            unary[0,:] = mrf_denoising_nllh(new_denoised, source, s).flatten()
-            unary[1, :] = mrf_denoising_nllh(new_denoised, target, s).flatten()
+            unary[0,:] = mrf_denoising_nllh(denoised, source, s).flatten()
+            unary[1, :] = mrf_denoising_nllh(denoised, target, s).flatten()
 
-            new_denoised = new_denoised.flatten()
+            denoised = denoised.flatten()
             for e in edges.tolist():
-                if new_denoised[e[0]] != new_denoised[e[1]]:
+                if denoised[e[0]] != denoised[e[1]]:
                     pairwise[e[0],e[1]] = lmbda
             labels = gco.graphcut(unary, csr_matrix(pairwise))
+            new_denoised = new_denoised.flatten()
             new_denoised[labels==0] = source.flatten()[labels==0]
             new_denoised[labels==1] = v
             new_denoised = new_denoised.reshape(source.shape)
-        if not (np.count_nonzero(new_denoised!=denoised)>0):
-            flag = False
-        denoised = new_denoised
+            denoised = denoised.reshape(source.shape)
+            check = np.count_nonzero(np.not_equal(new_denoised,denoised))
+            denoised = new_denoised
+            if check > 0:
+                break
+
+            if check==0 and v==254:
+                Flag = False
 
         if round > maxIter:
             break
