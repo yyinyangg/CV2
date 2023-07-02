@@ -79,10 +79,8 @@ class VOC2007Dataset(Dataset):
         img_path = self.img[index]+'.jpg'
         gt_path =  self.mask[index]+'.png'
 
-        img = utils.numpy2torch(np.array(Image.open(img_path).convert('RGB'))).to(torch.float32)
-        gt = utils.numpy2torch(np.array(Image.open(gt_path).convert('RGB'))).to(torch.int64)
-
-        gt = self.convertSeg(gt)
+        img = utils.numpy2torch(np.array(Image.open(img_path))).to(torch.float32)
+        gt = utils.numpy2torch(np.array(Image.open(gt_path))).to(torch.int64)
 
         item.update({'im':img, 'gt':gt})
 
@@ -104,6 +102,7 @@ class VOC2007Dataset(Dataset):
         return len(self.img)
 
     def convertSeg(self, gt):
+        #print("shape of gt is ", gt.shape)
         C,H,W = gt.shape
         rtn = torch.full((1,H,W),21) #21--ambiguous
 
@@ -112,7 +111,6 @@ class VOC2007Dataset(Dataset):
             mask = (gt == torch.Tensor(color).view(3, 1, 1)).all(dim=0)
             mask = torch.unsqueeze(mask, dim=0)
             rtn[mask] = label
-
         return rtn
 
 
@@ -162,18 +160,20 @@ def voc_label2color(np_image, np_label):
     # Set color channels (e.g., hue) based on labels
     color_channels = np.zeros_like(ycbcr[:, :, 1:])  # Initialize color channels
 
-
     for i, color in enumerate(VOC_LABEL2COLOR):
         # Find pixels with the corresponding label
         label_pixels = np_label == i
-        color = skimage.color.rgb2ycbcr(tuple(np.array(color)/255))
-        #print(label_pixels.shape)
-        #print(color_channels.shape)
-        # Set color channels for label pixels
-        color_channels[label_pixels[:,:,0],0] = color[1]
-        color_channels[label_pixels[:,:,0],1] = color[2]
+        color = skimage.color.rgb2ycbcr(np.array(color)/255)
+        y, cb, cr = color
+        color_channels[:,:,0][label_pixels] = cb
+        color_channels[:,:,1][label_pixels] = cr
+    label_pixels = np_label == 255
+    color = skimage.color.rgb2ycbcr(np.array((224,224,192)) / 255)
+    y, cb, cr = color
+    color_channels[:, :, 0][label_pixels] = cb
+    color_channels[:, :, 1][label_pixels] = cr
 
-    # Assemble texture component and color channels in YCbCr color space
+    # Assemble texture component and color ch,annels in YCbCr color space
     ycbcr_modified = np.dstack((texture, color_channels))
 
     # Convert color-coded representation back to RGB
@@ -201,18 +201,15 @@ def show_dataset_examples(loader, grid_height, grid_width, title):
     for i, data in enumerate(loader):
         image = data['im'][0]
         label = data['gt'][0]
-        #print(image.shape)
 
         # Convert tensors to NumPy arrays
         image_np = utils.torch2numpy(image)/255.0
-        print(image_np.max())
 
-        #print(image_np.shape)
-        label_np = utils.torch2numpy(label)/255.0
+        label_np = utils.torch2numpy(label)
 
-        # Apply voc_label2color to get color-coded labels
-        colored_label = voc_label2color(image_np, label_np)
 
+        colored_label = voc_label2color(image_np, label_np[:,:,0])
+        colored_label = np.clip(colored_label,0,1)
         # Plot the image and colored label
         row = i // grid_width
         col = i % grid_width
@@ -236,7 +233,10 @@ def normalize_input(input_tensor):
     Returns:
         normalized: torch tensor (B,3,H,W) (float32)
     """
-    normalized = []
+    mean = torch.tensor(VOC_STATISTICS["mean"]).view(1, 3, 1, 1)
+    std = torch.tensor(VOC_STATISTICS["std"]).view(1, 3, 1, 1)
+
+    normalized = (input_tensor - mean) / std
 
     assert (type(input_tensor) == type(normalized))
     assert (input_tensor.size() == normalized.size())
@@ -254,8 +254,10 @@ def run_forward_pass(normalized, model):
         prediction: class prediction of the model (B,1,H,W) (int64)
         acts: activations of the model (B,21,H,W) (float 32)
     """
-    prediction = []
-    acts = []
+    model.eval()
+    with torch.no_grad():
+        acts = model(normalized)
+        _, prediction = torch.max(acts, dim=1)
 
     assert (isinstance(prediction, torch.Tensor))
     assert (isinstance(acts, torch.Tensor))
@@ -272,6 +274,34 @@ def show_inference_examples(loader, model, grid_height, grid_width, title):
         grid_width: int
         title: string
     """
+    fig, axs = plt.subplots(grid_height, grid_width, figsize=(10, 10))
+    fig.suptitle(title)
+
+    for i, data in enumerate(loader):
+        image = data['im'][0]
+        gt = data['gt'][0]
+
+        # Convert tensors to NumPy arrays
+        image = normalize_input(torch.unsqueeze(utils.numpy2torch(np.clip(utils.torch2numpy(image),0,1)),dim=0))
+        label_np = utils.torch2numpy(gt)
+        prediction, acts = run_forward_pass(image,model)
+
+        avg_prec = average_precision(prediction,data['gt'])
+        prediction = utils.torch2numpy(prediction[0])
+
+        new_array = np.concatenate((label_np, prediction), axis=1)
+
+        row = i // grid_width
+        col = i % grid_width
+        axs[row,col].set_title(f"avg_prec ={avg_prec} ")
+        axs[row, col].imshow(new_array)
+        axs[row, col].axis('off')
+
+        if i + 1 == grid_height * grid_width:
+            break
+
+    plt.tight_layout()
+    plt.show()
     pass
 
 def average_precision(prediction, gt):
@@ -285,7 +315,12 @@ def average_precision(prediction, gt):
     Returns:
         avg_prec: torch scalar (float32)
     """
-    return None
+    totaly_pixels = prediction.numel()
+    prediction = prediction.view(-1)
+    gt = gt.view(-1)
+    correct_pixels = torch.sun(prediction==gt)
+    avg_prec = (correct_pixels.float() / totaly_pixels )*100
+    return avg_prec
 
 ### FUNCTIONS FOR PROBLEM 2 ###
 
@@ -352,15 +387,15 @@ def main():
     valid_loader = create_loader(valid_dataset, batch_size=1, shuffle=False, num_workers=1)
 
     # show some images for the training and validation set
-    show_dataset_examples(train_loader, grid_height=2, grid_width=3, title='training examples')
-    show_dataset_examples(valid_loader, grid_height=2, grid_width=3, title='validation examples')
-'''
+    #show_dataset_examples(train_loader, grid_height=2, grid_width=3, title='training examples')
+    #show_dataset_examples(valid_loader, grid_height=2, grid_width=3, title='validation examples')
+
     # Load FCN network
     model = models.segmentation.fcn_resnet101(pretrained=True, num_classes=21)
 
     # Apply fcn. Switch to training loader if you want more variety.
     show_inference_examples(valid_loader, model, grid_height=2, grid_width=3, title='inference examples')
-
+'''
     # attack1: convert cat to dog
     cat_example = find_unique_example(valid_loader, unique_foreground_label=8)
     show_unique_example(cat_example, model=model)
