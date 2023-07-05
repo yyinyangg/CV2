@@ -203,10 +203,9 @@ def show_dataset_examples(loader, grid_height, grid_width, title):
         label = data['gt'][0]
 
         # Convert tensors to NumPy arrays
-        image_np = utils.torch2numpy(image)/255.0
+        image_np = utils.torch2numpy(image)/255
 
         label_np = utils.torch2numpy(label)
-
 
         colored_label = voc_label2color(image_np, label_np[:,:,0])
         colored_label = np.clip(colored_label,0,1)
@@ -256,7 +255,8 @@ def run_forward_pass(normalized, model):
     """
     model.eval()
     with torch.no_grad():
-        acts = model(normalized)
+        acts = model(normalized)['out']
+        #print(acts['out'].shape)
         _, prediction = torch.max(acts, dim=1)
 
     assert (isinstance(prediction, torch.Tensor))
@@ -282,13 +282,16 @@ def show_inference_examples(loader, model, grid_height, grid_width, title):
         gt = data['gt'][0]
 
         # Convert tensors to NumPy arrays
-        image = normalize_input(torch.unsqueeze(utils.numpy2torch(np.clip(utils.torch2numpy(image),0,1)),dim=0))
+        image = normalize_input(torch.unsqueeze(utils.numpy2torch(utils.torch2numpy(image)/255),dim=0))
+        #print(image.shape)
         label_np = utils.torch2numpy(gt)
         prediction, acts = run_forward_pass(image,model)
 
         avg_prec = average_precision(prediction,data['gt'])
-        prediction = utils.torch2numpy(prediction[0])
+        prediction = utils.torch2numpy(prediction)
 
+        prediction = np.clip(voc_label2color(utils.torch2numpy(data['im'][0])/255,prediction[:,:,0]),0,1)
+        label_np = np.clip(voc_label2color(utils.torch2numpy(data['im'][0])/255,label_np[:,:,0]),0,1)
         new_array = np.concatenate((label_np, prediction), axis=1)
 
         row = i // grid_width
@@ -318,7 +321,7 @@ def average_precision(prediction, gt):
     totaly_pixels = prediction.numel()
     prediction = prediction.view(-1)
     gt = gt.view(-1)
-    correct_pixels = torch.sun(prediction==gt)
+    correct_pixels = torch.sum(prediction==gt)
     avg_prec = (correct_pixels.float() / totaly_pixels )*100
     return avg_prec
 
@@ -335,7 +338,15 @@ def find_unique_example(loader, unique_foreground_label):
         sample: a dictionary with keys 'im' and 'gt' specifying
                 the image sample 
     """
-    example = []
+    example = {}
+    for index, data in enumerate(loader):
+        image = data['im'][0]
+        label = data['gt'][0]
+        if len(torch.unique(label)) == 3 and 0 in label and unique_foreground_label in label:
+            print("got!")
+            example['im'] = image
+            example['gt'] = label
+            return example
 
     assert (isinstance(example, dict))
     return example
@@ -348,6 +359,26 @@ def show_unique_example(example_dict, model):
         example_dict: a dict with keys 'gt' and 'im' returned by an instance of VOC2007Dataset
         model: network (nn.Module)
     """
+
+    image = example_dict['im']
+    gt = example_dict['gt']
+
+    image = normalize_input(torch.unsqueeze(utils.numpy2torch(utils.torch2numpy(image) / 255), dim=0))
+    # print(image.shape)
+    label_np = utils.torch2numpy(gt)
+    prediction, acts = run_forward_pass(image, model)
+
+    avg_prec = average_precision(prediction, example_dict['gt'])
+    prediction = utils.torch2numpy(prediction)
+
+    prediction = np.clip(voc_label2color(utils.torch2numpy(example_dict['im']) / 255, prediction[:, :, 0]), 0, 1)
+    label_np = np.clip(voc_label2color(utils.torch2numpy(example_dict['im']) / 255, label_np[:, :, 0]), 0, 1)
+    new_array = np.concatenate((label_np, prediction), axis=1)
+
+    plt.title(f"avg_prec ={avg_prec} ")
+    plt.imshow(new_array)
+    plt.axis('off')
+    plt.show()
     pass
 
 
@@ -365,6 +396,67 @@ def show_attack(example_dict, model, src_label, target_label, learning_rate, ite
 
     This function does not return anything, but instead visualises the results (see Fig. 4).
     """
+    image = example_dict['im']
+    gt_mask = example_dict['gt']
+
+    # Convert pixels with src_label to target_label to create fake gt mask
+    fake_gt_mask = gt_mask.clone()
+    fake_gt_mask[gt_mask == src_label] = target_label
+
+    image = normalize_input(torch.unsqueeze(utils.numpy2torch(utils.torch2numpy(image) / 255), dim=0))
+    # Enable gradient tracking for input image
+    image.requires_grad = True
+
+    optimizer = optim.LBFGS([image], lr=learning_rate)
+    optimizer.zero_grad()
+
+    def closure():
+        optimizer.zero_grad()
+        loss = torch.nn.functional.cross_entropy(prediction, fake_gt_mask)
+        loss.backward()
+        return loss
+
+    # Optimize the input image
+    for _ in range(iterations):
+        prediction, acts = run_forward_pass(image, model)
+        fake_gt_mask = fake_gt_mask.float()
+        prediction = prediction.float()
+        fake_gt_mask.requires_grad = True
+        prediction.requires_grad = True
+
+        #image.grad[gt_mask == 0] = 0
+        optimizer.step(closure)
+
+    # Disable gradient tracking for input image
+    image.requires_grad = False
+
+    # Obtain the resulting prediction after fooling
+    prediction, acts = run_forward_pass(image, model)
+
+    # Visualize the results
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+    axes[0,0].imshow(utils.torch2numpy(example_dict['im']) / 255)
+    axes[0,0].set_title("Input before fooling")
+    axes[0,0].axis('off')
+
+    image = np.transpose(image.detach().cpu().numpy()[0], (1, 2, 0))
+    axes[0,1].imshow(image)
+    axes[0,1].set_title("Input after fooling")
+    axes[0,1].axis('off')
+
+
+    prImage = np.transpose(example_dict['im'], (1, 2, 0))
+    diff = torch.norm( prImage- image, p=2, dim=2)
+    print(diff.shape)
+    axes[1,0].imshow(diff.detach().cpu().numpy())
+    axes[1,0].set_title("Difference")
+    axes[1,0].axis('off')
+
+    #axes[1,1].imshow()
+    #axes[1,1].set_title("New prediction")
+    #axes[1,1].axis('off')
+
+    plt.show()
     pass
 
 
@@ -394,14 +486,15 @@ def main():
     model = models.segmentation.fcn_resnet101(pretrained=True, num_classes=21)
 
     # Apply fcn. Switch to training loader if you want more variety.
-    show_inference_examples(valid_loader, model, grid_height=2, grid_width=3, title='inference examples')
-'''
+    #show_inference_examples(valid_loader, model, grid_height=2, grid_width=3, title='inference examples')
+
     # attack1: convert cat to dog
     cat_example = find_unique_example(valid_loader, unique_foreground_label=8)
-    show_unique_example(cat_example, model=model)
+    #show_unique_example(cat_example, model=model)
+
     show_attack(cat_example, model, src_label=8, target_label=12, learning_rate=1.0, iterations=10)
 
     # feel free to try other examples..
-'''
+
 if __name__ == '__main__':
     main()
