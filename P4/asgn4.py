@@ -479,18 +479,18 @@ def main():
     valid_loader = create_loader(valid_dataset, batch_size=1, shuffle=False, num_workers=1)
 
     # show some images for the training and validation set
-    #show_dataset_examples(train_loader, grid_height=2, grid_width=3, title='training examples')
-    #show_dataset_examples(valid_loader, grid_height=2, grid_width=3, title='validation examples')
+    show_dataset_examples(train_loader, grid_height=2, grid_width=3, title='training examples')
+    show_dataset_examples(valid_loader, grid_height=2, grid_width=3, title='validation examples')
 
     # Load FCN network
     model = models.segmentation.fcn_resnet101(pretrained=True, num_classes=21)
 
     # Apply fcn. Switch to training loader if you want more variety.
-    #show_inference_examples(valid_loader, model, grid_height=2, grid_width=3, title='inference examples')
+    show_inference_examples(valid_loader, model, grid_height=2, grid_width=3, title='inference examples')
 
     # attack1: convert cat to dog
     cat_example = find_unique_example(valid_loader, unique_foreground_label=8)
-    #show_unique_example(cat_example, model=model)
+    show_unique_example(cat_example, model=model)
 
     show_attack(cat_example, model, src_label=8, target_label=12, learning_rate=1.0, iterations=10)
 
